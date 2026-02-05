@@ -1,3 +1,5 @@
+using Amazon.SimpleNotificationService;
+using Amazon.SQS;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Transport;
 using FIAP.CloudGames.Games.API.Extensions;
@@ -9,13 +11,13 @@ using FIAP.CloudGames.Games.Infrastructure.Configuration.Auth;
 using FIAP.CloudGames.Games.Infrastructure.Configuration.Search;
 using FIAP.CloudGames.Games.Infrastructure.Context;
 using FIAP.CloudGames.Games.Infrastructure.Logging;
+using FIAP.CloudGames.Games.Infrastructure.Messaging;
 using FIAP.CloudGames.Games.Infrastructure.Repositories;
 using FIAP.CloudGames.Games.Infrastructure.Search;
 using FIAP.CloudGames.Games.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Models;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -26,15 +28,20 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Swagger
+#region AWS SDK Configuration
+
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<IAmazonSQS>();
+builder.Services.AddAWSService<IAmazonSimpleNotificationService>();
+
+#endregion
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddCustomSwagger();
 
-// DbContext
 builder.Services.AddDbContext<GamesDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Logging
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
@@ -72,11 +79,16 @@ builder.Services.AddOpenTelemetry()
 
 #region Application Services Configuration
 
+builder.Services.AddSingleton<IAuthenticationRequestPublisher, AuthenticationRequestPublisher>();
+builder.Services.AddSingleton<IPaymentEventPublisher, PaymentEventPublisher>();
+builder.Services.AddSingleton<IAuthenticationResponseCache, AuthenticationResponseCache>();
 builder.Services.AddScoped<IGameRepository, GameRepository>();
 builder.Services.AddScoped<IGameService, GameService>();
-builder.Services.AddHttpClient();
-builder.Services.AddControllers();
 
+builder.Services.AddHostedService<AuthenticationResponseConsumer>();
+
+builder.Services.AddHttpClient();
+builder.Services.AddControllers(); 
 
 #endregion
 
@@ -136,7 +148,7 @@ builder.Services.AddSingleton<ElasticsearchClient>(sp =>
 
     var uri = new Uri(settings.Url);
     var clientSettings = new ElasticsearchClientSettings(uri)
-        .DisableDirectStreaming(); // ajuda a debugar
+        .DisableDirectStreaming();
 
     return new ElasticsearchClient(clientSettings);
 });
@@ -152,16 +164,28 @@ builder.Services.AddHttpClient("Payments", (sp, client) =>
     client.BaseAddress = new Uri(settings.BaseUrl);
 });
 
+builder.Services.AddHealthChecks()
+    .AddCheck("sqs-connection", () =>
+    {
+        try
+        {
+            var sqs = builder.Services.BuildServiceProvider().GetRequiredService<IAmazonSQS>();
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy();
+        }
+        catch
+        {
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy();
+        }
+    });
+
 var app = builder.Build();
 
 app.UsePathBase("/games");
 app.UseRouting();
 
-// Middlewares
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseMiddleware<CorrelationIdMiddleware>();
 
-// Migrações (igual Users, porém sem Seed)
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<GamesDbContext>();
@@ -187,6 +211,7 @@ app.UseSerilogRequestLogging(options =>
 
 
 app.MapGet("/health", () => Results.Ok("OK")).AllowAnonymous();
+app.MapGet("/health/ready", () => Results.Ok("OK")).AllowAnonymous();
 
 if (app.Environment.IsDevelopment())
 {
