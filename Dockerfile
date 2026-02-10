@@ -21,9 +21,12 @@ RUN dotnet publish src/FIAP.CloudGames.Games.API/FIAP.CloudGames.Games.API.cspro
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}-alpine AS runtime
 WORKDIR /app
 
+RUN apk add --no-cache icu-libs icu-data-full
+
 ENV ASPNETCORE_URLS="http://+:8080" \
     ASPNETCORE_ENVIRONMENT="Production" \
-    DOTNET_EnableDiagnostics=0
+    DOTNET_EnableDiagnostics=0 \
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 
 EXPOSE 8080
 
