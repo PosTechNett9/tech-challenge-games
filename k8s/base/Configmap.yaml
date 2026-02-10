@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: games-service-config
+  namespace: production
+data:
+  # Application Settings
+  ASPNETCORE_ENVIRONMENT: "Development"
+  ASPNETCORE_URLS: "http://+:8080"
+  
+  # Swagger
+  SwaggerBasePath: "/games"
+  
+  # AWS Configuration
+  AWS__Region: "us-east-1"
+  
+  # Globalization
+  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "false"
+  
+  # Serilog Configuration
+  Serilog__MinimumLevel__Default: "Information"
+  Serilog__MinimumLevel__Override__Microsoft: "Warning"
+  Serilog__MinimumLevel__Override__System: "Warning"
+  
+  # OpenTelemetry Configuration
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  OTEL_SERVICE_NAME: "games-service"
+  OTEL_SERVICE_VERSION: "1.0.0"
+  
+  # Health Check Configuration
+  HealthChecks__UI__PollingInterval: "10"
+  HealthChecks__UI__EvaluationTimeInSeconds: "10"
+  
+  # JWT Settings (não sensíveis)
+  JwtSettings__Issuer: "CloudGamesAPI"
+  JwtSettings__Audience: "CloudGamesClient"
+  JwtSettings__ExpirationInMinutes: "60"
